@@ -1,0 +1,14 @@
+--- sqlite3-3.38.3.orig/Makefile.in
++++ sqlite3-3.38.3/Makefile.in
+@@ -672,9 +672,9 @@
+ 		-avoid-version
+ 	sed -i "/dependency_libs/s/'.*'/''/" $@
+ 
+-sqlite3$(TEXE):	shell.c sqlite3.c
++sqlite3$(TEXE):	shell.c libsqlite3.la
+ 	$(LTLINK) $(READLINE_FLAGS) $(SHELL_OPT) -o $@ \
+-		shell.c sqlite3.c \
++		shell.c libsqlite3.la \
+ 		$(LIBREADLINE) $(TLIBS) -rpath "$(libdir)"
+ 
+ sqldiff$(TEXE):	$(TOP)/tool/sqldiff.c sqlite3.lo sqlite3.h

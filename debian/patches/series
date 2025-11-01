@@ -1,0 +1,13 @@
+10-520466-libsqlite3-depends-on-libdl.patch
+10-520478-squash-bad-deps.patch
+20-hurd-locking-style.patch
+30-cross.patch
+10-665363-disable-malloc-usable-size.patch
+31-increase_SQLITE_MAX_DEFAULT_PAGE_SIZE_to_32k.patch
+32-dynamic_link.patch
+02-use-packaged-lempar.c.patch
+40-amalgamation_configure.patch
+CVE-2025-29087_3277.patch
+CVE-2025-29088.patch
+CVE-2025-6965.patch
+CVE-2025-7709.patch

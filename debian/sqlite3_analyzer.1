@@ -1,0 +1,39 @@
+.Dd 2018-07-22
+.Dt SQLITE3_ANALYZER 1
+.Os "Debian GNU/Linux"
+.Sh NAME
+.Nm sqlite3_analyzer
+.Nd SQLite3 database space usage analyzis tool
+.Sh SYNOPSIS
+.Nm
+.Op Fl -pageinfo
+.Op Fl -stats
+.Op Fl -tclsh
+.Op Fl -version
+.Ar database.sqlite
+.Sh DESCRIPTION
+.Nm
+program analyze an SQLite database file and
+output a report detailing size and storage efficiency
+information for the database and its constituent tables and indexes.
+.Pp
+.Sh OPTIONS
+.Bl -tag -width indent
+.It Fl -pageinfo
+Show how each page of the database-file is used
+.It Fl -stats
+Output SQL text that creates a new database containing
+statistics about the database that was analyzed
+.It Fl -tclsh
+Run the built-in TCL interpreter interactively (for debugging)
+.It Fl -version
+Show the version number of SQLite
+.El
+.Sh AUTHOR
+.Nm
+has been written by
+.An D. Richard Hipp Aq drh@hwaci.com .
+.Pp
+This manual page was written by
+.An Yuriy M. Kaminskiy Aq yumkam+debian@gmail.com
+for the Debian GNU/Linux system.

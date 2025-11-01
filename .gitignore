@@ -1,0 +1,7 @@
+*.o
+*.so
+debian/.debhelper/
+debian/tmp/
+*~
+*.swp
+build/
