@@ -1,0 +1,56 @@
+#!/bin/sh
+set -e
+
+# Autopkgtest for LP #2087772: segfault in nested LEFT JOIN within INNER JOIN
+# https://bugs.launchpad.net/ubuntu/+source/sqlite3/+bug/2087772
+
+echo "Testing nested JOIN scenario that previously caused segfault..."
+
+# Run the test query that reproduces the bug
+sqlite3 :memory: << 'EOF'
+CREATE TABLE BIOG_TEXT_DATA (
+    c_textid INTEGER,
+    c_role_id INTEGER,
+    c_source INTEGER
+);
+
+CREATE TABLE TEXT_CODES (
+    c_textid INTEGER PRIMARY KEY,
+    c_title TEXT
+);
+
+CREATE TABLE TEXT_ROLE_CODES (
+    c_role_id INTEGER PRIMARY KEY,
+    c_role_desc TEXT
+);
+
+INSERT INTO TEXT_CODES VALUES (1, 'Main');
+INSERT INTO TEXT_ROLE_CODES VALUES (1, 'Author');
+INSERT INTO BIOG_TEXT_DATA VALUES (1, 1, 2);
+
+-- This view definition triggers the segfault in affected versions
+-- The issue occurs with LEFT JOIN nested inside INNER JOIN
+CREATE VIEW V AS
+SELECT
+    BIOG_TEXT_DATA.c_textid,
+    TEXT_CODES.c_title,
+    BIOG_TEXT_DATA.c_role_id,
+    TEXT_ROLE_CODES.c_role_desc,
+    BIOG_TEXT_DATA.c_source
+FROM
+    TEXT_ROLE_CODES
+    INNER JOIN (
+        TEXT_CODES
+        INNER JOIN (
+            BIOG_TEXT_DATA
+            LEFT JOIN TEXT_CODES AS TEXT_CODES_1
+              ON BIOG_TEXT_DATA.c_source = TEXT_CODES_1.c_textid
+        ) ON TEXT_CODES.c_textid = BIOG_TEXT_DATA.c_textid
+    ) ON TEXT_ROLE_CODES.c_role_id = BIOG_TEXT_DATA.c_role_id;
+
+-- Query the view - this should not segfault
+SELECT COUNT(*) FROM V;
+EOF
+
+echo "PASS: nested JOIN test completed successfully (no segfault)"
+exit 0
