@@ -1,0 +1,78 @@
+name: dpkg-buildpackage-matrix
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        combo:
+          - name: baseline
+            opts: "hardening=+all,-pie"
+            cflags: ""
+            lflags: ""
+          - name: lto_only
+            opts: "hardening=+all,-pie"
+            cflags: "-flto"
+            lflags: "-flto"
+          - name: pie_only
+            opts: "hardening=+all"
+            cflags: "-fPIE"
+            lflags: "-pie"
+          - name: lto_pie
+            opts: "hardening=+all"
+            cflags: "-flto -fPIE"
+            lflags: "-flto -pie"
+          - name: ubuntu_default
+            opts: ""
+            cflags: ""
+            lflags: ""
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install deps
+        run: sudo apt-get update && sudo apt-get install -y build-essential devscripts fakeroot
+
+      - name: Download Ubuntu source
+        run: |
+          sudo apt-get source sqlite3
+          SRC=$(find . -maxdepth 1 -type d -name "sqlite3-*")
+          echo "SRC_DIR=$SRC" >> $GITHUB_ENV
+
+      - name: Build package (${{ matrix.combo.name }})
+        run: |
+          cd $SRC_DIR
+          export DEB_BUILD_MAINT_OPTIONS="${{ matrix.combo.opts }}"
+          export DEB_CFLAGS_MAINT_APPEND="${{ matrix.combo.cflags }}"
+          export DEB_LDFLAGS_MAINT_APPEND="${{ matrix.combo.lflags }}"
+          echo "=== Building with options ==="
+          echo "DEB_BUILD_MAINT_OPTIONS=$DEB_BUILD_MAINT_OPTIONS"
+          echo "DEB_CFLAGS_MAINT_APPEND=$DEB_CFLAGS_MAINT_APPEND"
+          echo "DEB_LDFLAGS_MAINT_APPEND=$DEB_LDFLAGS_MAINT_APPEND"
+          dpkg-buildpackage -us -uc -b > ../build-${{ matrix.combo.name }}.log 2>&1 || true
+
+      - name: Run smoke test (${{ matrix.combo.name }})
+        run: |
+          set -eux
+          BIN=$(find .. -type f -name sqlite3 | head -n1)
+          echo "BIN=$BIN"
+          echo "CREATE TABLE t(x); INSERT INTO t VALUES(1); SELECT count(*) FROM t;" > ../test.sql
+          timeout 20s $BIN :memory: -cmd ".read ../test.sql" -cmd ".exit" \
+            > ../run-${{ matrix.combo.name }}.log 2>&1 || true
+          file $BIN > ../bininfo-${{ matrix.combo.name }}.txt
+          readelf -h $BIN | grep Type >> ../bininfo-${{ matrix.combo.name }}.txt
+          readelf -S $BIN | grep lto >> ../bininfo-${{ matrix.combo.name }}.txt
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dpkg-build-${{ matrix.combo.name }}
+          path: |
+            build-${{ matrix.combo.name }}.log
+            run-${{ matrix.combo.name }}.log
+            bininfo-${{ matrix.combo.name }}.txt
