@@ -10,74 +10,82 @@ jobs:
       fail-fast: false
       matrix:
         combo:
-          - name: baseline
-            opts: "hardening=+all,-pie"
-            cflags: ""
-            lflags: ""
-          - name: lto_only
-            opts: "hardening=+all,-pie"
-            cflags: "-flto"
-            lflags: "-flto"
-          - name: pie_only
-            opts: "hardening=+all"
-            cflags: "-fPIE"
-            lflags: "-pie"
-          - name: lto_pie
-            opts: "hardening=+all"
-            cflags: "-flto -fPIE"
-            lflags: "-flto -pie"
-          - name: ubuntu_default
-            opts: ""
-            cflags: ""
-            lflags: ""
+          - { name: baseline,    opts: "hardening=+all,-pie", cflags: "",            lflags: "" }
+          - { name: lto_only,    opts: "hardening=+all,-pie", cflags: "-flto",       lflags: "-flto" }
+          - { name: pie_only,    opts: "hardening=+all",      cflags: "-fPIE",       lflags: "-pie" }
+          - { name: lto_pie,     opts: "hardening=+all",      cflags: "-flto -fPIE", lflags: "-flto -pie" }
+          - { name: ubuntu_def,  opts: "",                    cflags: "",            lflags: "" }
+
     steps:
-      - name: Checkout repo
+      - name: Checkout workflow repo
         uses: actions/checkout@v4
 
-      - name: Enable source repositories
+      - name: Enable deb-src repositories (for Ubuntu 24.04)
         run: |
-          sudo sed -i 's/^# deb-src/deb-src/' /etc/apt/sources.list
+          set -eux
+          . /etc/os-release
+          CODENAME="${VERSION_CODENAME}"
+          cat <<EOF | sudo tee /etc/apt/sources.list.d/ubuntu-src.list
+          deb-src http://archive.ubuntu.com/ubuntu/ ${CODENAME} main restricted universe multiverse
+          deb-src http://archive.ubuntu.com/ubuntu/ ${CODENAME}-updates main restricted universe multiverse
+          deb-src http://security.ubuntu.com/ubuntu/ ${CODENAME}-security main restricted universe multiverse
+          EOF
           sudo apt-get update
 
-      - name: Install deps
-        run: sudo apt-get update && sudo apt-get install -y build-essential devscripts fakeroot
-
-      - name: Download Ubuntu source
+      - name: Install build tools & dependencies
         run: |
-          sudo apt-get source sqlite3
-          SRC=$(find . -maxdepth 1 -type d -name "sqlite3-*")
-          echo "SRC_DIR=$SRC" >> $GITHUB_ENV
+          sudo apt-get install -y devscripts build-essential fakeroot
+          sudo apt-get build-dep -y sqlite3
 
-      - name: Build package (${{ matrix.combo.name }})
+      - name: Fetch Ubuntu source
         run: |
-          cd $SRC_DIR
-          export DEB_BUILD_MAINT_OPTIONS="${{ matrix.combo.opts }}"
-          export DEB_CFLAGS_MAINT_APPEND="${{ matrix.combo.cflags }}"
-          export DEB_LDFLAGS_MAINT_APPEND="${{ matrix.combo.lflags }}"
-          echo "=== Building with options ==="
+          apt-get source sqlite3
+          SRC_DIR=$(ls -d sqlite3-*/ | head -n1 | tr -d '/')
+          echo "SRC_DIR=$SRC_DIR" >> $GITHUB_ENV
+
+      - name: Build via dpkg-buildpackage (${{ matrix.combo.name }})
+        env:
+          DEB_BUILD_MAINT_OPTIONS: ${{ matrix.combo.opts }}
+          DEB_CFLAGS_MAINT_APPEND: ${{ matrix.combo.cflags }}
+          DEB_LDFLAGS_MAINT_APPEND: ${{ matrix.combo.lflags }}
+        run: |
+          set -eux
+          cd "$SRC_DIR"
           echo "DEB_BUILD_MAINT_OPTIONS=$DEB_BUILD_MAINT_OPTIONS"
           echo "DEB_CFLAGS_MAINT_APPEND=$DEB_CFLAGS_MAINT_APPEND"
           echo "DEB_LDFLAGS_MAINT_APPEND=$DEB_LDFLAGS_MAINT_APPEND"
-          dpkg-buildpackage -us -uc -b > ../build-${{ matrix.combo.name }}.log 2>&1 || true
+          dpkg-buildpackage -us -uc -b > "../build-${{ matrix.combo.name }}.log" 2>&1 || true
 
-      - name: Run smoke test (${{ matrix.combo.name }})
+      - name: Locate built sqlite3 binary
+        id: findbin
         run: |
           set -eux
-          BIN=$(find .. -type f -name sqlite3 | head -n1)
-          echo "BIN=$BIN"
-          echo "CREATE TABLE t(x); INSERT INTO t VALUES(1); SELECT count(*) FROM t;" > ../test.sql
-          timeout 20s $BIN :memory: -cmd ".read ../test.sql" -cmd ".exit" \
-            > ../run-${{ matrix.combo.name }}.log 2>&1 || true
-          file $BIN > ../bininfo-${{ matrix.combo.name }}.txt
-          readelf -h $BIN | grep Type >> ../bininfo-${{ matrix.combo.name }}.txt
-          readelf -S $BIN | grep lto >> ../bininfo-${{ matrix.combo.name }}.txt
+          BIN=$(find . -type f -path "./sqlite3-*/debian/*/usr/bin/sqlite3" -print -quit || true)
+          if [ -z "$BIN" ]; then
+            BIN=$(find . -type f -name sqlite3 -executable | head -n1 || true)
+          fi
+          echo "BIN=$BIN" | tee binpath-${{ matrix.combo.name }}.txt
+          echo "BIN=$BIN" >> $GITHUB_ENV
+
+      - name: Smoke test (${{ matrix.combo.name }})
+        run: |
+          set -eux
+          echo "CREATE TABLE t(x); INSERT INTO t VALUES(1); SELECT count(*) FROM t;" > test.sql
+          timeout 20s "$BIN" :memory: -cmd ".read test.sql" -cmd ".exit" \
+            > run-${{ matrix.combo.name }}.log 2>&1 || true
+          file "$BIN" > bininfo-${{ matrix.combo.name }}.txt
+          readelf -h "$BIN" | grep Type >> bininfo-${{ matrix.combo.name }}.txt || true
+          readelf -S "$BIN" | grep lto >> bininfo-${{ matrix.combo.name }}.txt || true
+          echo "=== tail of run log ==="
+          tail -n 20 run-${{ matrix.combo.name }}.log || true
 
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dpkg-build-${{ matrix.combo.name }}
+          name: dpkg-${{ matrix.combo.name }}
           path: |
             build-${{ matrix.combo.name }}.log
             run-${{ matrix.combo.name }}.log
             bininfo-${{ matrix.combo.name }}.txt
+            binpath-${{ matrix.combo.name }}.txt
