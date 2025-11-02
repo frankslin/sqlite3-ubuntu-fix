@@ -66,18 +66,70 @@ jobs:
           fi
           echo "BIN=$BIN" | tee binpath-${{ matrix.combo.name }}.txt
           echo "BIN=$BIN" >> $GITHUB_ENV
+          test -n "$BIN"
+
+      - name: Prepare minimal repro SQL
+        run: |
+          cat > test.sql <<'SQL'
+          -- Base tables
+          CREATE TABLE BIOG_TEXT_DATA (
+              c_textid   INTEGER,
+              c_role_id  INTEGER,
+              c_source   INTEGER
+          );
+
+          CREATE TABLE TEXT_CODES (
+              c_textid INTEGER PRIMARY KEY,
+              c_title  TEXT
+          );
+
+          CREATE TABLE TEXT_ROLE_CODES (
+              c_role_id   INTEGER PRIMARY KEY,
+              c_role_desc TEXT
+          );
+
+          -- Data
+          INSERT INTO TEXT_CODES VALUES (1, 'Main');
+          INSERT INTO TEXT_ROLE_CODES VALUES (1, 'Author');
+          INSERT INTO BIOG_TEXT_DATA VALUES (1, 1, 2);
+
+          -- View identical in shape to the problem case
+          CREATE VIEW V AS
+          SELECT
+              BIOG_TEXT_DATA.c_textid,
+              TEXT_CODES.c_title,
+              BIOG_TEXT_DATA.c_role_id,
+              TEXT_ROLE_CODES.c_role_desc,
+              BIOG_TEXT_DATA.c_source,
+              TEXT_CODES_1.c_title,
+              TEXT_CODES_1.c_title_chn
+          FROM
+              TEXT_ROLE_CODES
+              INNER JOIN (
+                  TEXT_CODES
+                  INNER JOIN (
+                      BIOG_TEXT_DATA
+                      LEFT JOIN TEXT_CODES AS TEXT_CODES_1
+                        ON BIOG_TEXT_DATA.c_source = TEXT_CODES_1.c_textid
+                  ) ON TEXT_CODES.c_textid = BIOG_TEXT_DATA.c_textid
+              ) ON TEXT_ROLE_CODES.c_role_id = BIOG_TEXT_DATA.c_role_id;
+
+          -- Trigger crash on buggy builds
+          SELECT COUNT(*) FROM V;
+          SQL
 
       - name: Smoke test (${{ matrix.combo.name }})
         run: |
           set -eux
-          echo "CREATE TABLE t(x); INSERT INTO t VALUES(1); SELECT count(*) FROM t;" > test.sql
-          timeout 20s "$BIN" :memory: -cmd ".read test.sql" -cmd ".exit" \
+          timeout 25s "$BIN" :memory: -cmd ".read test.sql" -cmd ".exit" \
             > run-${{ matrix.combo.name }}.log 2>&1 || true
           file "$BIN" > bininfo-${{ matrix.combo.name }}.txt
           readelf -h "$BIN" | grep Type >> bininfo-${{ matrix.combo.name }}.txt || true
           readelf -S "$BIN" | grep lto >> bininfo-${{ matrix.combo.name }}.txt || true
+          echo "sqlite3 --version:" >> bininfo-${{ matrix.combo.name }}.txt
+          "$BIN" --version >> bininfo-${{ matrix.combo.name }}.txt 2>/dev/null || true
           echo "=== tail of run log ==="
-          tail -n 20 run-${{ matrix.combo.name }}.log || true
+          tail -n 50 run-${{ matrix.combo.name }}.log || true
 
       - name: Upload artifacts
         if: always()
@@ -85,7 +137,9 @@ jobs:
         with:
           name: dpkg-${{ matrix.combo.name }}
           path: |
+            ${{ env.BIN }}
             build-${{ matrix.combo.name }}.log
             run-${{ matrix.combo.name }}.log
             bininfo-${{ matrix.combo.name }}.txt
             binpath-${{ matrix.combo.name }}.txt
+            test.sql
